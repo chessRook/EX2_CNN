@@ -5,6 +5,8 @@ from torch.utils.tensorboard import SummaryWriter
 import torchvision.transforms as transforms
 import torch.nn.functional as F
 from tqdm import tqdm
+from pathlib import Path
+import atexit
 
 
 ######################### HELPERS ###########################
@@ -83,6 +85,7 @@ class Decoder(nn.Module):
     def __init__(self, channels=1, out_resolution=(8, 8), latent_size=20):
         super(Decoder, self).__init__()
         self.out_resolution = out_resolution
+        self.latent_size = latent_size
         self.tConv1 = nn.ConvTranspose2d(in_channels=latent_size, out_channels=64, kernel_size=(4, 4), stride=(1, 1),
                                          padding=(0, 0))
         self.tConv2 = nn.ConvTranspose2d(in_channels=64, out_channels=32, kernel_size=(4, 4), stride=(2, 2),
@@ -168,7 +171,7 @@ def gan_trainer(epochs, k, loss_gen_method, loss_disc_method):
             loss_gen = train_generator(generator, discriminator, z, loss_gen_method, gen_optimizer)
             writer.add_scalar('gen_losses', loss_gen, counter.__next__())
             ###################################################
-            if idx % 350 == 1:
+            if idx % 3_000 == 1:
                 show_results(generator, img)
 
 
@@ -269,8 +272,38 @@ def max_unpool_out_shape(h_w, kernel_size=2, stride=2, pad=0):
     return h, w
 
 
+PATH_TO_SAVE_DISC = Path('./trained_discriminator')
+PATH_TO_SAVE_GEN = Path('./trained_generator')
+
+
+def model_saver():
+    torch.save(discriminator.state_dict(), PATH_TO_SAVE_DISC)
+    torch.save(generator.state_dict(), PATH_TO_SAVE_GEN)
+
+
+def model_loader():
+    discriminator = Encoder(resolution=(28, 28), compression_size=1).to(device)
+    generator = Decoder(channels=1, out_resolution=(28, 28), latent_size=noise_size).to(device)
+    ##############################################################################################
+    discriminator.load_state_dict(torch.load(PATH_TO_SAVE_DISC, map_location=device))
+    generator.load_state_dict(torch.load(PATH_TO_SAVE_GEN, map_location=device))
+    return generator, discriminator
+
+
+##############################################################################
+def exit_handler():
+    model_saver()
+
+
+atexit.register(exit_handler)
 ##############################################################################
 
-
 if __name__ == '__main__':
-    gan_trainer(3, k=1, loss_gen_method=non_staurating_gen_loss, loss_disc_method=mini_max_loss_disc)
+    gan_trainer(3, k=1, loss_gen_method=ls_loss_gen, loss_disc_method=ls_loss_disc)
+
+###################DOCS###############################
+# loss_3 works for k = 1
+# loss_2 works for k = ?
+# most important to keep both losses far from 0
+# in equilibrium such that no one wins
+# and for this we tune k !!!
