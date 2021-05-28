@@ -1,6 +1,7 @@
 import torch, torchvision
 import torch.nn as nn
 import numpy as np
+from pandas._libs.parsers import k
 from torch.utils.tensorboard import SummaryWriter
 import torchvision.transforms as transforms
 import torch.nn.functional as F
@@ -86,15 +87,14 @@ class Decoder(nn.Module):
         super(Decoder, self).__init__()
         self.out_resolution = out_resolution
         self.latent_size = latent_size
-        self.tConv1 = nn.ConvTranspose2d(in_channels=latent_size, out_channels=64, kernel_size=(4, 4), stride=(1, 1),
-                                         padding=(0, 0))
-        self.tConv2 = nn.ConvTranspose2d(in_channels=64, out_channels=32, kernel_size=(4, 4), stride=(2, 2),
+        self.fc1 = nn.Linear(latent_size, 4 * 4 * latent_size)  # 4 is to make out resolution good
+        self.tConv2 = nn.ConvTranspose2d(in_channels=100, out_channels=32, kernel_size=(4, 4), stride=(2, 2),
                                          padding=(2, 2))
         self.tConv3 = nn.ConvTranspose2d(in_channels=32, out_channels=16, kernel_size=(4, 4), stride=(2, 2))
         self.tConv4 = nn.ConvTranspose2d(in_channels=16, out_channels=1, kernel_size=(4, 4), stride=(2, 2),
                                          padding=(1, 1))
 
-        self.bn1 = nn.BatchNorm2d(self.tConv1.out_channels)
+        self.bn1 = nn.BatchNorm2d(int(self.fc1.out_features / 16))
         self.bn2 = nn.BatchNorm2d(self.tConv2.out_channels)
         self.bn3 = nn.BatchNorm2d(self.tConv3.out_channels)
 
@@ -103,9 +103,10 @@ class Decoder(nn.Module):
         self.img_width = 28
 
     def forward(self, z):
-        z = z.to(device)
-        img1a = self.tConv1(z)
-        img1b = self.default_activation(self.bn1(img1a))
+        z = z.squeeze().to(device)
+        img1a = self.fc1(z)
+        img1a_viewed = img1a.view(batch_size, -1, 4, 4)
+        img1b = self.default_activation(self.bn1(img1a_viewed))
 
         img2a = self.tConv2(img1b)
         img2b = self.default_activation(self.bn2(img2a))
@@ -141,8 +142,9 @@ noise_size = 1_00
 discriminator = Encoder(resolution=(28, 28), compression_size=1).to(device)
 generator = Decoder(channels=1, out_resolution=(28, 28), latent_size=noise_size).to(device)
 #######################################################################
-disc_optimizer = torch.optim.Adam(discriminator.parameters(), lr=.001)
-gen_optimizer = torch.optim.Adam(generator.parameters(), lr=.001)
+lr = .0007
+disc_optimizer = torch.optim.Adam(discriminator.parameters(), lr=lr)
+gen_optimizer = torch.optim.Adam(generator.parameters(), lr=lr)
 #######################################################################
 transform = torchvision.transforms.Compose([transforms.ToTensor(), ])
 mnist_data = torchvision.datasets.MNIST(download=True, root='./', transform=transform)
@@ -154,25 +156,73 @@ batch_size = 5
 fake_label = torch.zeros(size=(batch_size, 1)).to(device)
 real_label = torch.ones(size=(batch_size, 1)).to(device)
 
-
 ######################################################################
 
+PATH_TO_SAVE_DISC = Path('./Trained_GANS_4_INFERENCE/trained_discriminator')
+PATH_TO_SAVE_GEN = Path('./Trained_GANS_4_INFERENCE/trained_generator')
 
-def gan_trainer(epochs, k, loss_gen_method, loss_disc_method):
+
+######################################################################
+class List50:
+    def __init__(self):
+        self.last50 = []
+
+    def get_avg(self):
+        if self.last50.__len__() <= 50:
+            return None
+        else:
+            return sum(self.last50) / 50
+
+    def add_number(self, num):
+        if self.last50.__len__() >= 50:
+            self.last50.pop(0)
+        self.last50.append(num)
+
+
+def gan_trainer(epochs, k_disc, k_gen, loss_gen_method, loss_disc_method):
+    disc_losses_50, gen_losses_50 = List50(), List50()
     for epoch in range(epochs):
         for idx, (img, img_digs) in tqdm(enumerate(data_loader)):
             ##################################################
-            for inner_idx in range(k):
+            for inner_idx in range(k_disc):
                 z = get_z(noise_size=100)
-                loss_disc = train_discriminator(generator, discriminator, z, img, loss_disc_method, disc_optimizer)
-                writer.add_scalar('disc_losses', loss_disc, counter.__next__())
+                loss_disc_on_fake, loss_disc_on_real = train_discriminator(generator, discriminator, z, img,
+                                                                           loss_disc_method, disc_optimizer)
+                writer.add_scalar('disc_losses_on_fake', loss_disc_on_fake, counter.__next__())
+                writer.add_scalar('disc_losses_on_real', loss_disc_on_real, counter.__next__())
+                disc_losses_50.add_number(loss_disc_on_fake + loss_disc_on_real)
             ##########################################################
-            z = get_z(noise_size=100)
-            loss_gen = train_generator(generator, discriminator, z, loss_gen_method, gen_optimizer)
-            writer.add_scalar('gen_losses', loss_gen, counter.__next__())
+            for inner_idx in range(k_gen):
+                z = get_z(noise_size=100)
+                loss_gen = train_generator(generator, discriminator, z, loss_gen_method, gen_optimizer)
+                writer.add_scalar('gen_losses', loss_gen, counter.__next__())
+                gen_losses_50.add_number(loss_gen)
             ###################################################
-            if idx % 3_000 == 1:
+            if idx % 3_000 == 150:
                 show_results(generator, img)
+                model_saver()
+            if idx % 2_000 == 1999:
+                k_gen, k_disc = who_wins(disc_losses_50, gen_losses_50, k_gen, k_disc)
+                writer.add_scalar('k_disc', k_disc, int(idx / 2_000) + 1)
+                writer.add_scalar('k_gen', k_gen, int(idx / 2_000) + 1)
+
+
+def who_wins(disc_losses_50, gen_losses_50, k_gen, k_disc):
+    disc_avg = disc_losses_50.get_avg()
+    gen_avg = gen_losses_50.get_avg()
+    if disc_avg is None or gen_avg is None:
+        return k_gen, k_disc
+    if disc_avg < .08 and gen_avg > .2:
+        if k_disc > 1:
+            k_disc -= 1
+        else:
+            k_gen += 1
+    if disc_avg > .2 and gen_avg < .08:
+        if k_gen > 1:
+            k_gen -= 1
+        else:
+            k_disc += 1
+    return min(k_gen, 4), min(k_disc, 4)
 
 
 def get_z(noise_size=100):
@@ -181,23 +231,13 @@ def get_z(noise_size=100):
 
 
 def show_results(generator, img):
+    torchvision.transforms.ToPILImage()(img[0]).show()
+    ############################################################
     z = get_z(100)
     tensor_image = generator(z).squeeze(0)
     image = torchvision.transforms.ToPILImage()(tensor_image[0])
     image.show()
     print(image)
-    ############################################################
-    torchvision.transforms.ToPILImage()(img[0]).show()
-
-
-def who_wins(discriminator, generator, get_images, threshold):
-    with torch.no_grad():
-        pred = discriminator(generator(get_images.__next__()))
-        error_rate = torch.mean(pred)
-        if error_rate < threshold:
-            return 'discriminator'
-        else:
-            return 'generator'
 
 
 def train_generator(generator, discriminator, z, loss, optimizer):
@@ -218,7 +258,7 @@ def train_discriminator(generator, discriminator, z, real_img, loss, optimizer):
     loss_on_fake = loss(pred_for_fake_img, fake_label)  # log(1 - D(G(z))) --> want to maximize the loss.  WANT 0
     optim_step(loss_on_fake, optimizer)
     ############################################
-    return (loss_on_fake + loss_on_real).item()
+    return loss_on_fake.item(), loss_on_real.item()
 
 
 def optim_step(loss_, optimizer):
@@ -272,22 +312,12 @@ def max_unpool_out_shape(h_w, kernel_size=2, stride=2, pad=0):
     return h, w
 
 
-PATH_TO_SAVE_DISC = Path('./trained_discriminator')
-PATH_TO_SAVE_GEN = Path('./trained_generator')
-
-
 def model_saver():
     torch.save(discriminator.state_dict(), PATH_TO_SAVE_DISC)
     torch.save(generator.state_dict(), PATH_TO_SAVE_GEN)
 
 
-def model_loader():
-    discriminator = Encoder(resolution=(28, 28), compression_size=1).to(device)
-    generator = Decoder(channels=1, out_resolution=(28, 28), latent_size=noise_size).to(device)
-    ##############################################################################################
-    discriminator.load_state_dict(torch.load(PATH_TO_SAVE_DISC, map_location=device))
-    generator.load_state_dict(torch.load(PATH_TO_SAVE_GEN, map_location=device))
-    return generator, discriminator
+
 
 
 ##############################################################################
@@ -296,10 +326,12 @@ def exit_handler():
 
 
 atexit.register(exit_handler)
+
 ##############################################################################
 
+
 if __name__ == '__main__':
-    gan_trainer(3, k=1, loss_gen_method=ls_loss_gen, loss_disc_method=ls_loss_disc)
+    gan_trainer(epochs=3, k_disc=1, k_gen=1, loss_gen_method=non_staurating_gen_loss, loss_disc_method=mini_max_loss_disc)
 
 ###################DOCS###############################
 # loss_3 works for k = 1
