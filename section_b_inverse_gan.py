@@ -14,7 +14,7 @@ writer = SummaryWriter()
 
 DISC_PATH = Path(r'.\Trained_GANS_4_INFERENCE_dont_touch\trained_discriminator')
 GEN_PATH = Path(r'.\Trained_GANS_4_INFERENCE_dont_touch\trained_generator')
-INVERSER_PATH = Path(r'.\Trained_GANS_4_INFERENCE_dont_touch\section_b_inverser_13_21_36')
+INVERSER_PATH = Path(r'.\Trained_GANS_4_INFERENCE_dont_touch\trained_inverser')
 device = 'cuda'
 
 
