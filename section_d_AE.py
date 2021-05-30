@@ -1,3 +1,4 @@
+import matplotlib.pyplot as plt
 import main
 import torch, torchvision
 from torch.utils.tensorboard import SummaryWriter
@@ -16,17 +17,19 @@ data_loader = main.data_loader
 encoder = main.Encoder(resolution=(28, 28), channels=1, compression_size=latent_space)
 decoder = main.Decoder(channels=1, out_resolution=(28, 28), latent_size=latent_space)
 
+#######################################################################################
+
 CLASSIFIER_PATH = Path('./Trained_GANS_4_INFERENCE_dont_touch/'
                        'mnist_classifier_encoder_d_part')
 classifier = mnist_classifier.BigEncoder(resolution=(28, 28), channels=1, compression_size=10)
 classifier.load_state_dict(torch.load(CLASSIFIER_PATH, map_location=device))
 classifier.to('cuda')
 
-##########################
+##########################################################################################
 mnist_classifier.tester(classifier)
 mnist_classifier.tester(classifier)
 mnist_classifier.tester(classifier)
-##########################
+##########################################################################################
 epochs = 10
 
 
@@ -56,7 +59,72 @@ ENC_PATH = Path('section_d_good_results/section_d_encoder_part')
 DEC_PATH = Path('section_d_good_results/section_d_decoder_part')
 
 
+def trainer():
+    stepper = iter(range(int(1e10)))
+    for epoch in range(epochs):
+        for (images, labels) in data_loader:
+            idx = stepper.__next__()
+            if idx % 5_000 == 4_999:
+                shower(images)
+            if idx % 10_000 == 9_999:
+                experiment()
+            images.to(device)
+            latent_var = encoder(images)
+            out_images = decoder(latent_var)
+            # loss = perceptual_loss(classifier, out_images, images)
+            # loss = nn.MSELoss()(out_images.to(device), images.to(device))
+            loss = nn.L1Loss()(out_images.to(device), images.to(device))
+            loss.backward()
+            global_optim.step()
+            global_optim.zero_grad()
+            writer.add_scalar('section_D_LOSS', loss.item(), idx)
+            if idx % 2_000 == 1_999:
+                save_model()
+
+
+def experiment():
+    z_s_lst = []
+    for i, (images, labels) in enumerate(data_loader):
+        z_s = encoder(images)
+        z_s_lst.append(z_s)
+        if i >= 2:
+            break
+
+    z_0 = z_s_lst[0]
+    z_1 = z_s_lst[1]
+
+    for j in range(11):
+        z_j = (j / 10) * z_0 + (1 - j / 10) * z_1
+        img_j = decoder(z_j)
+        ###########################################
+        plt.imshow(img_j[0, 0].cpu().detach().numpy())
+        plt.title(f'alpha={j / 10}')
+        plt.show()
+        # ###########################################
+    plt.show()
+
+
+def shower(images):
+    pred_images = decoder(encoder(images))
+    img, pred_img = images[0], pred_images[0]
+    img_, pred_img_ = transform.ToPILImage()(img), transform.ToPILImage()(pred_img)
+    img_.show()
+    pred_img_.show()
+
+
+def save_model():
+    torch.save(encoder.state_dict(), ENC_PATH)
+    torch.save(decoder.state_dict(), DEC_PATH)
+
+
+if __name__ == '__main__':
+    trainer()
+
+
 ####################################
+####################################
+####################################
+
 
 def perceptual_loss(model, img1, img2):
     img1_features = features_extractor(model, img1)
@@ -93,41 +161,4 @@ def features_extractor(classifier_, img):
     features = (img2e,)
     return features
 
-
 #######################################
-def trainer():
-    stepper = iter(range(int(1e10)))
-    for epoch in range(epochs):
-        for (images, labels) in data_loader:
-            idx = stepper.__next__()
-            if idx % 5_000 == 0:
-                shower(images)
-            images.to(device)
-            latent_var = encoder(images)
-            out_images = decoder(latent_var)
-            # loss = perceptual_loss(classifier, out_images, images)
-            # loss = nn.MSELoss()(out_images.to(device), images.to(device))
-            loss = nn.L1Loss()(out_images.to(device), images.to(device))
-            loss.backward()
-            global_optim.step()
-            global_optim.zero_grad()
-            writer.add_scalar('section_D_LOSS', loss.item(), idx)
-            if idx % 2_000 == 1_999:
-                save_model()
-
-
-def shower(images):
-    pred_images = decoder(encoder(images))
-    img, pred_img = images[0], pred_images[0]
-    img_, pred_img_ = transform.ToPILImage()(img), transform.ToPILImage()(pred_img)
-    img_.show()
-    pred_img_.show()
-
-
-def save_model():
-    torch.save(encoder.state_dict(), ENC_PATH)
-    torch.save(decoder.state_dict(), DEC_PATH)
-
-
-if __name__ == '__main__':
-    trainer()
