@@ -120,11 +120,11 @@ def hot(labels):
     return hot_labels_
 
 
-def tester():
+def tester(model=encoder):
     total = errors = 0
     for idx, (images, labels) in enumerate(data_loader):
         with torch.no_grad():
-            pred_s = encoder(images)
+            pred_s = model(images)
             preds_soft = nn.Softmax(dim=-1)(pred_s)
             pred_labels = torch.argmax(preds_soft, dim=-1)
             errors += sum([1 for i in range(pred_labels.shape[0]) if pred_labels[i] != labels[i]])

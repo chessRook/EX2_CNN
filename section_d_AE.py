@@ -1,13 +1,10 @@
-from collections import namedtuple
-
-from torchvision.models import vgg
-
 import main
 import torch, torchvision
 from torch.utils.tensorboard import SummaryWriter
 from pathlib import Path
-import torchvision.models as models
 import torchvision.transforms as transform
+import mnist_classifier
+import torch.nn as nn
 
 ##################################
 writer = SummaryWriter()
@@ -21,12 +18,19 @@ decoder = main.Decoder(channels=1, out_resolution=(28, 28), latent_size=latent_s
 
 CLASSIFIER_PATH = Path('./Trained_GANS_4_INFERENCE_dont_touch/'
                        'mnist_classifier_encoder_d_part')
-classifier = main.Encoder(resolution=(28, 28), channels=1, compression_size=10)
+classifier = mnist_classifier.BigEncoder(resolution=(28, 28), channels=1, compression_size=10)
 classifier.load_state_dict(torch.load(CLASSIFIER_PATH, map_location=device))
 classifier.to('cuda')
 
+##########################
+mnist_classifier.tester(classifier)
+mnist_classifier.tester(classifier)
+mnist_classifier.tester(classifier)
+##########################
 epochs = 10
 
+
+##########################
 
 def freezer(model):
     model.train(False)
@@ -43,16 +47,13 @@ decoder.to(device)
 encoder.to(device)
 
 ##################################
-
-enc_optim = torch.optim.Adam(encoder.parameters(), lr=.000009)
-dec_optim = torch.optim.Adam(decoder.parameters(), lr=.000009)
 global_optim = torch.optim.Adam([{'params': encoder.parameters()},
-                                 {'params': decoder.parameters()}], lr=.000009)
+                                 {'params': decoder.parameters()}], lr=.001)
 
 ####################################
 
-ENC_PATH = Path('./section_d_encoder_part')
-DEC_PATH = Path('./section_d_decoder_part')
+ENC_PATH = Path('section_d_good_results/section_d_encoder_part')
+DEC_PATH = Path('section_d_good_results/section_d_decoder_part')
 
 
 ####################################
@@ -79,10 +80,17 @@ def features_extractor(classifier_, img):
     img1c = classifier_.conv3(img2b)
     img2c = classifier_.default_activation(img1c)
 
-    vector = img2c.view(batch_size, -1)  # image 2 vec
+    img1d = classifier_.conv4(img2c)
+    img2d = classifier_.default_activation(img1d)
+
+    img1e = classifier_.conv5(img2d)
+    img2e = classifier_.default_activation(img1e)
+
+    vector = img2e.view(batch_size, -1)  # image 2 vec
     out = classifier_.fc1(vector)
     out_normalizer = classifier_.final_activation(out)
-    features = (img2a, img2b, img2c, out_normalizer)
+
+    features = (img2e,)
     return features
 
 
@@ -92,12 +100,14 @@ def trainer():
     for epoch in range(epochs):
         for (images, labels) in data_loader:
             idx = stepper.__next__()
-            if idx % 3_000 == 0:
+            if idx % 5_000 == 0:
                 shower(images)
             images.to(device)
             latent_var = encoder(images)
             out_images = decoder(latent_var)
-            loss = perceptual_loss(classifier, out_images, images)
+            # loss = perceptual_loss(classifier, out_images, images)
+            # loss = nn.MSELoss()(out_images.to(device), images.to(device))
+            loss = nn.L1Loss()(out_images.to(device), images.to(device))
             loss.backward()
             global_optim.step()
             global_optim.zero_grad()
