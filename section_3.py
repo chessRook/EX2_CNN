@@ -27,6 +27,7 @@ def z_searcher(img_masked, img):
     img_masked.requires_grad = False
     img_masked = img_masked.to('cuda')
     z = inverser(img_masked)
+    z = z.detach()
     z_copy = torch.clone(z).to('cuda')
     optimizer = torch.optim.Adam((z_copy,), lr=.001)
     trained_generator.train(False)
@@ -40,7 +41,7 @@ def z_searcher(img_masked, img):
     restored_img = trained_generator(z_copy)
     restored_pil_img = transform.ToPILImage()(restored_img[0])
     results = {'restored': restored_pil_img, 'img': img, 'masked_img': img_masked}
-    return results
+    return results, z_copy
 
 
 def _main_():
@@ -56,7 +57,7 @@ def restore_with_me(mask_name, mask_method, num_of_images=4):
     for idx, (img, label) in zip(range(num_of_images), data_loader):
         img.to('cuda')
         img_masked = mask_method(img)
-        results_dict = z_searcher(img_masked, img)
+        results_dict, __ = z_searcher(img_masked, img)
         results_by_time[idx] = results_dict
     display(results_by_time, mask_name)
 
@@ -103,7 +104,7 @@ def small_center_mask(image):
     out_image = image.clone()
     i_center, j_center = int(image.shape[-1] / 2), int(image.shape[-1] / 2)
     i_window, j_window = int(image.shape[-1] / 8), int(image.shape[-1] / 8)
-    mask = torch.randn(size=(i_window * 2, j_window * 2))
+    mask = torch.zeros(size=(i_window * 2, j_window * 2))
     out_image[:, 0, i_center - i_window: i_center + i_window, j_center - j_window: j_center + j_window] = mask
     return out_image
 
@@ -112,7 +113,7 @@ def large_center_mask(image):
     out_image = image.clone()
     i_center, j_center = int(image.shape[-1] / 2), int(image.shape[-1] / 2)
     i_window, j_window = int(image.shape[-1] / 4), int(image.shape[-1] / 4)
-    mask = torch.randn(size=(i_window * 2, j_window * 2))
+    mask = torch.zeros(size=(i_window * 2, j_window * 2))
     out_image[:, 0, i_center - i_window: i_center + i_window, j_center - j_window: j_center + j_window] = mask
     return out_image
 
@@ -134,7 +135,7 @@ def random_mask(image):
         img_num = random.randint(0, 4)
         i = random.randint(0, 27)
         j = random.randint(0, 27)
-        out_image[img_num, 0, i, j] = random.random()
+        out_image[img_num, 0, i, j] = 0
     return out_image
 
 

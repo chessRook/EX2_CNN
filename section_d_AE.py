@@ -1,3 +1,4 @@
+import section_3
 import matplotlib.pyplot as plt
 import main
 import torch, torchvision
@@ -67,7 +68,7 @@ def trainer():
             if idx % 5_000 == 4_999:
                 shower(images)
             if idx % 10_000 == 9_999:
-                experiment()
+                experiment_ae()
             images.to(device)
             latent_var = encoder(images)
             out_images = decoder(latent_var)
@@ -82,7 +83,7 @@ def trainer():
                 save_model()
 
 
-def experiment():
+def experiment_ae():
     z_s_lst = []
     for i, (images, labels) in enumerate(data_loader):
         z_s = encoder(images)
@@ -98,7 +99,29 @@ def experiment():
         img_j = decoder(z_j)
         ###########################################
         plt.imshow(img_j[0, 0].cpu().detach().numpy())
-        plt.title(f'alpha={j / 10}')
+        plt.title(f'AE interpolation experiment : alpha={j / 10}')
+        plt.show()
+        # ###########################################
+    plt.show()
+
+
+def experiment_with_gan_section_d():
+    z_s_lst = []
+    for i, (images, labels) in enumerate(data_loader):
+        __, z_s = section_3.z_searcher(images, images)
+        z_s_lst.append(z_s)
+        if i >= 2:
+            break
+
+    z_0 = z_s_lst[0]
+    z_1 = z_s_lst[1]
+
+    for j in range(11):
+        z_j = (j / 10) * z_0 + (1 - j / 10) * z_1
+        img_j = section_3.trained_generator(z_j)
+        ###########################################
+        plt.imshow(img_j[0, 0].cpu().detach().numpy())
+        plt.title(f'GAN INTERPOLATION , alpha={j / 10}')
         plt.show()
         # ###########################################
     plt.show()
@@ -118,6 +141,7 @@ def save_model():
 
 
 if __name__ == '__main__':
+    experiment_with_gan_section_d()
     trainer()
 
 

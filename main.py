@@ -121,11 +121,11 @@ class Decoder(nn.Module):
         return result
 
 
-@staticmethod
-def __closest_sqr(num):
-    sqrt_num = np.sqrt(num)
-    num_ = int(sqrt_num) + 1
-    return num_
+    @staticmethod
+    def __closest_sqr(num):
+        sqrt_num = np.sqrt(num)
+        num_ = int(sqrt_num) + 1
+        return num_
 
 
 mini_max_loss_gen = lambda x, y: -nn.BCELoss()(x, y)
